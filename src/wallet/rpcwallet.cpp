@@ -38,6 +38,7 @@
 #include <univalue.h>
 
 #include <functional>
+#include <iostream>
 
 static const std::string WALLET_ENDPOINT_BASE = "/wallet/";
 
@@ -133,6 +134,196 @@ std::string LabelFromValue(const UniValue& value)
         throw JSONRPCError(RPC_WALLET_INVALID_LABEL_NAME, "Invalid label name");
     return label;
 }
+
+//UniValue mgetcommittransaction(const JSONRPCRequest& request)
+//{
+//	CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+//	if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+//		return NullUniValue;
+//	}
+//
+//    if (request.fHelp || request.params.size() != 3) {
+//        throw std::runtime_error("Your function man");
+//    }
+//
+//	uint256 txid = ParseHashV(request.params[0], "parameter 0");
+//	int nOutput = AmountFromValue(request.params[1]);
+//	std::vector<unsigned char> data = ParseHexV(request.params[2], "Data");
+//
+//	CMutableTransaction rawTx;
+//	CTxIn in(COutPoint(txid, nOutput));
+//	in.prevout.
+//	rawTx.vin.push_back(in);
+//
+//    CTxOut out(0, CScript() << OP_RETURN << data);
+//
+//    CTxOut out()
+//    rawTx.vout.push_back(out);
+//
+//    if (!pwallet->SignTransaction(rawTx))
+//    	throw std::runtime_error("Cannot sign...");
+//
+//    return EncodeHexTx(rawTx);
+//}
+
+UniValue mgetkeypairhash(const JSONRPCRequest& request)
+{
+	CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+
+	if (!EnsureWalletIsAvailable(pwallet, request.fHelp))
+		return NullUniValue;
+
+	if (request.fHelp || request.params.size() != 2)
+		throw std::runtime_error(
+			"mgetkeypairhash \"oldkeyid\" \"newkeyid\" \n"
+			"\nReturns the hash of the concatenated oldpublic key and new public key. "
+			"This hashed data will be used for a commit reveal scheme which will "
+			"ensure the transition to quantum resistance signature schemes.\n"
+			"\nArguments:\n"
+			"1. oldkeyid    (string, required) The hex representation of the id of "
+			"a key associated to some address. As returned by msks.\n"
+			"2. newkeyid    (string, required) The hex representation of the id of "
+			"a key associated to some address. As returned by msks.\n"
+			"\nResult:\n"
+			"hexstring");
+
+    RPCTypeCheck(request.params, {UniValue::VSTR, UniValue::VSTR}, false);
+
+	const std::string oldKeyIdStr = request.params[0].get_str();
+	CKeyID oldKeyId;
+	oldKeyId.SetHex(oldKeyIdStr);
+	CPubKey oldPubKey;
+	if (!pwallet->GetPubKey(oldKeyId, oldPubKey))
+		throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin key");
+
+	const std::string newKeyIdStr = request.params[1].get_str();
+	CKeyID newKeyId;
+	newKeyId.SetHex(newKeyIdStr);
+	CPubKey newPubKey;
+	if (!pwallet->GetPubKey(newKeyId, newPubKey))
+		throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin key");
+
+	uint256 data = Hash(oldPubKey.begin(), oldPubKey.end(), newPubKey.begin(), newPubKey.end());
+	return UniValue(data.GetHex());
+}
+
+UniValue mgetrawrevealtx(const JSONRPCRequest& request)
+{
+	CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+
+	if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+		return NullUniValue;
+	}
+
+	if (request.fHelp || request.params.size() != 3)
+		throw std::runtime_error("mgetrawrevealtx \"oldkeyid\" \"newaddress\" \"commitdata\" \n"
+			"\nReturns a raw transaction which consumes all UTXOS associated to oldkeyid, "
+			"sends all the funds to the new address and also appends special commit data so that"
+			" this can be verified using a new consensus protocol for quantum resistance.\n"
+			"\nArguments:\n"
+			"1. oldkeyid    (string, required) The hex representation of the id of "
+			"a key associated to some address. As returned by msks.\n"
+			"2. newaddress    (string, required) A new (QR) address.\n"
+			"3. commitdata    (string, required) Not yet known.\n"
+			"\nResult:\n"
+			"hexstring");
+
+	ObserveSafeMode();
+
+	std::string oldKeyIDHex = request.params[0].get_str();
+
+	CTxDestination dest = DecodeDestination(request.params[1].get_str());
+	if (!IsValidDestination(dest)) {
+		throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin address");
+	}
+	// Make sure the results are valid at least up to the most recent block
+	// the user could have gotten from another RPC command prior to now
+	pwallet->BlockUntilSyncedToCurrentChain();
+
+	LOCK2(cs_main, pwallet->cs_wallet);
+	std::vector<COutput> vecOutputs;
+	pwallet->AvailableCoins(vecOutputs);
+
+	// Construct tx with inputs all of the UTXOS secured by oldKey and compute total amount in them
+	CMutableTransaction rawTx;
+	CAmount totalAmount = 0;
+	for (const COutput& out : vecOutputs) {
+		CTxDestination address;
+		const CScript& scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
+		if (!ExtractDestination(scriptPubKey, address)) {
+			continue;
+		}
+		if (!IsValidDestination(address)) {
+			throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin address");
+		}
+		auto keyid = GetKeyForDestination(*pwallet, address);
+		if (keyid.IsNull()) {
+			throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to a key");
+		}
+		if (keyid.GetHex() == oldKeyIDHex) {
+			CTxIn in(COutPoint(out.tx->tx->GetHash(), out.i));
+			rawTx.vin.push_back(in);
+			totalAmount += out.tx->tx->vout[out.i].nValue;
+		}
+	}
+	totalAmount -= 10000; // incentivise transaction to be mined
+
+	// Build the outputs
+	CScript scriptPubKey = GetScriptForDestination(dest);
+
+	CTxOut out(totalAmount, scriptPubKey);
+	rawTx.vout.push_back(out);
+
+	rawTx.qrRevealData.stack = request.params[2].get_str();
+	std::cout<<"Creating with data: " + rawTx.qrRevealData.stack<<std::endl;
+	return EncodeHexTx(rawTx);
+}
+
+
+UniValue msks(const JSONRPCRequest& request)
+{
+	CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+
+	if (!EnsureWalletIsAvailable(pwallet, request.fHelp))
+		return NullUniValue;
+
+	if (request.fHelp || request.params.size() != 0)
+		throw std::runtime_error(
+			"msks\n"
+			"\nReturns an object where the keys are ecdsa key ids in hex and the"
+			" values are details about the funds, outptus and addresses secured by the respective key.\n"
+			"\nArguments: none\n"
+			"\nResult:\n"
+			"hexstring");
+
+	ObserveSafeMode();
+
+	// Make sure the results are valid at least up to the most recent block
+	// the user could have gotten from another RPC command prior to now
+	pwallet->BlockUntilSyncedToCurrentChain();
+
+	LOCK2(cs_main, pwallet->cs_wallet);
+	std::vector<COutput> vecOutputs;
+	pwallet->AvailableCoins(vecOutputs);
+	UniValue res(UniValue::VOBJ);
+	for (const COutput& out : vecOutputs) {
+		CTxDestination address;
+		const CScript& scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
+		if (!ExtractDestination(scriptPubKey, address)) {
+			continue;
+		}
+		if (!IsValidDestination(address)) {
+			throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin address");
+		}
+		CKeyID keyId = GetKeyForDestination(*pwallet, address);
+		if (keyId.IsNull()) {
+			continue;
+		}
+		res.pushKV(EncodeDestination(address), keyId.ToString());
+	}
+	return res;
+}
+
 
 UniValue getnewaddress(const JSONRPCRequest& request)
 {
@@ -3968,7 +4159,10 @@ extern UniValue rescanblockchain(const JSONRPCRequest& request);
 static const CRPCCommand commands[] =
 { //  category              name                                actor (function)                argNames
     //  --------------------- ------------------------          -----------------------         ----------
-    { "rawtransactions",    "fundrawtransaction",               &fundrawtransaction,            {"hexstring","options","iswitness"} },
+	{ "mine", 				"msks", 							&msks,							 {} },
+	{ "mine", 				"mgetrawrevealtx", 					&mgetrawrevealtx, 				{"oldkeyid", "newaddress", "commitdata"} },
+	{ "mine", 				"mgetkeypairhash", 					&mgetkeypairhash,	 			{"oldkeyid", "newkeyid"} },
+	{ "rawtransactions",    "fundrawtransaction",               &fundrawtransaction,            {"hexstring","options","iswitness"} },
     { "hidden",             "resendwallettransactions",         &resendwallettransactions,      {} },
     { "wallet",             "abandontransaction",               &abandontransaction,            {"txid"} },
     { "wallet",             "abortrescan",                      &abortrescan,                   {} },
