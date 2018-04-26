@@ -11,6 +11,7 @@
 #include <script/script.h>
 #include <serialize.h>
 #include <uint256.h>
+#include <iostream>
 
 static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
 
@@ -174,6 +175,25 @@ public:
     std::string ToString() const;
 };
 
+/** Extra data for a reveal transaction to link it to some commit transaction.
+ */
+struct CTxQrData
+{
+    // Note that this encodes the data elements being pushed, rather than
+    // encoding them as a CScript that pushes them.
+    std::string stack;
+
+    // Some compilers complain without a default constructor
+    CTxQrData() { }
+
+    bool IsNull() const { return stack.empty(); }
+
+    void SetNull() { stack = ""; }
+
+    std::string ToString() const { return "CTxQrData(" + stack + ")"; }
+};
+
+
 struct CMutableTransaction;
 
 /**
@@ -191,6 +211,8 @@ struct CMutableTransaction;
  * - std::vector<CTxOut> vout
  * - if (flags & 1):
  *   - CTxWitness wit;
+ * - if (flags & 2):
+ * 	 - CTxQrData qrRevealData;
  * - uint32_t nLockTime
  */
 template<typename Stream, typename TxType>
@@ -221,6 +243,11 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
             s >> tx.vin[i].scriptWitness.stack;
         }
     }
+    if (flags & 2) {
+    	/* The qr-scheme flag is present. */
+    	flags ^= 2;
+    	s >> tx.qrRevealData.stack;
+    }
     if (flags) {
         /* Unknown flag in the serialization */
         throw std::ios_base::failure("Unknown transaction optional data");
@@ -241,6 +268,9 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
             flags |= 1;
         }
     }
+    if (!tx.qrRevealData.IsNull()) {
+		flags |= 2;
+	}
     if (flags) {
         /* Use extended format in case witnesses are to be serialized. */
         std::vector<CTxIn> vinDummy;
@@ -253,6 +283,9 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s << tx.vin[i].scriptWitness.stack;
         }
+    }
+    if (flags & 2) {
+    	s << tx.qrRevealData.stack;
     }
     s << tx.nLockTime;
 }
@@ -282,7 +315,7 @@ public:
     const std::vector<CTxOut> vout;
     const int32_t nVersion;
     const uint32_t nLockTime;
-
+    const CTxQrData qrRevealData;
 private:
     /** Memory only. */
     const uint256 hash;
@@ -349,12 +382,12 @@ public:
 
     bool HasWitness() const
     {
-        for (size_t i = 0; i < vin.size(); i++) {
-            if (!vin[i].scriptWitness.IsNull()) {
-                return true;
-            }
-        }
-        return false;
+		for (size_t i = 0; i < vin.size(); i++) {
+			if (!vin[i].scriptWitness.IsNull()) {
+				return true;
+			}
+		}
+		return false;
     }
 };
 
@@ -365,6 +398,7 @@ struct CMutableTransaction
     std::vector<CTxOut> vout;
     int32_t nVersion;
     uint32_t nLockTime;
+    CTxQrData qrRevealData;
 
     CMutableTransaction();
     CMutableTransaction(const CTransaction& tx);
