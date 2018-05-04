@@ -1249,7 +1249,16 @@ uint256 SignatureHash(const CScript& scriptCode, const CTransaction& txTo, unsig
 
 bool TransactionSignatureChecker::VerifySignature(const std::vector<unsigned char>& vchSig, const CPubKey& pubkey, const uint256& sighash) const
 {
-    return pubkey.Verify(sighash, vchSig);
+	if (pubkey.isQR()) // if QR pubkey, just check the QR sig
+		return pubkey.Verify(sighash, vchSig);
+	if (pubkey.Verify(sighash, vchSig)) {// if classic pubkey, check it
+		for (const std::pair<CPubKey, CPubKey> pair : txTo->qrWit) {
+		    if (pair.first == pubkey) {
+		    	return VerifySignature(vchSig, pair.second, sighash) ;
+		    }
+		}
+	}
+    return true;
 }
 
 bool TransactionSignatureChecker::CheckSig(const std::vector<unsigned char>& vchSigIn, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const

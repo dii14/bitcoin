@@ -172,6 +172,16 @@ public:
         return size() > 0;
     }
 
+    void makeQR()
+    {
+    	vch[1] = 0x00;
+    }
+
+    bool isQR() const
+    {
+    	return vch[1] == 0x00;
+    }
+
     //! fully validate whether this is a valid public key (more expensive than IsValid())
     bool IsFullyValid() const;
 

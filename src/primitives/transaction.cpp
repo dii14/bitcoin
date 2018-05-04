@@ -54,8 +54,8 @@ std::string CTxOut::ToString() const
     return strprintf("CTxOut(nValue=%d.%08d, scriptPubKey=%s)", nValue / COIN, nValue % COIN, HexStr(scriptPubKey).substr(0, 30));
 }
 
-CMutableTransaction::CMutableTransaction() : nVersion(CTransaction::CURRENT_VERSION), nLockTime(0), qrRevealData() {}
-CMutableTransaction::CMutableTransaction(const CTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrRevealData(tx.qrRevealData) {}
+CMutableTransaction::CMutableTransaction() : nVersion(CTransaction::CURRENT_VERSION), nLockTime(0), qrWit() {}
+CMutableTransaction::CMutableTransaction(const CTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrWit(tx.qrWit) {}
 
 uint256 CMutableTransaction::GetHash() const
 {
@@ -76,9 +76,9 @@ uint256 CTransaction::GetWitnessHash() const
 }
 
 /* For backward compatibility, the hash is initialized to 0. TODO: remove the need for this default constructor entirely. */
-CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nLockTime(0), qrRevealData(), hash() {}
-CTransaction::CTransaction(const CMutableTransaction &tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrRevealData(tx.qrRevealData), hash(ComputeHash()) {}
-CTransaction::CTransaction(CMutableTransaction &&tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrRevealData(tx.qrRevealData), hash(ComputeHash()) {}
+CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nLockTime(0), qrWit(), hash() {}
+CTransaction::CTransaction(const CMutableTransaction &tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrWit(tx.qrWit), hash(ComputeHash()) {}
+CTransaction::CTransaction(CMutableTransaction &&tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrWit(tx.qrWit), hash(ComputeHash()) {}
 
 CAmount CTransaction::GetValueOut() const
 {
@@ -99,12 +99,11 @@ unsigned int CTransaction::GetTotalSize() const
 std::string CTransaction::ToString() const
 {
     std::string str;
-    str += strprintf("CTransaction(hash=%s, ver=%d, vin.size=%u, vout.size=%u, qrrevealdata=%s, nLockTime=%u)\n",
+    str += strprintf("CTransaction(hash=%s, ver=%d, vin.size=%u, vout.size=%u, nLockTime=%u)\n",
         GetHash().ToString().substr(0,10),
         nVersion,
         vin.size(),
         vout.size(),
-		qrRevealData.stack,
         nLockTime);
     for (const auto& tx_in : vin)
         str += "    " + tx_in.ToString() + "\n";
@@ -112,5 +111,8 @@ std::string CTransaction::ToString() const
         str += "    " + tx_in.scriptWitness.ToString() + "\n";
     for (const auto& tx_out : vout)
         str += "    " + tx_out.ToString() + "\n";
+    for (const std::pair<CPubKey, CPubKey> pair : qrWit) {
+    	str += "    " + pair.first.GetHash().ToString() + ": " + pair.second.GetHash().ToString() + "\n";
+    }
     return str;
 }

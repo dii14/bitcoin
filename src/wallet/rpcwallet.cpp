@@ -175,14 +175,13 @@ UniValue mgetkeypairhash(const JSONRPCRequest& request)
 
 	if (request.fHelp || request.params.size() != 2)
 		throw std::runtime_error(
-			"mgetkeypairhash \"oldkeyid\" \"newkeyid\" \n"
-			"\nReturns the hash of the concatenated oldpublic key and new public key. "
+			"mgetkeypairhash \"oldkeyhash\" \"newkeyhash\" \n"
+			"\nReturns the hash of the concatenation of: hash(oldpublic key) and hash(new public key)."
 			"This hashed data will be used for a commit reveal scheme which will "
 			"ensure the transition to quantum resistance signature schemes.\n"
 			"\nArguments:\n"
-			"1. oldkeyid    (string, required) The hex representation of the id of "
-			"a key associated to some address. As returned by msks.\n"
-			"2. newkeyid    (string, required) The hex representation of the id of "
+			"1. oldkeyhash    (string, required) The hash of a \n"
+			"2.     (string, required) The hex representation of the id of "
 			"a key associated to some address. As returned by msks.\n"
 			"\nResult:\n"
 			"hexstring");
@@ -230,7 +229,7 @@ UniValue mgetrawrevealtx(const JSONRPCRequest& request)
 
 	ObserveSafeMode();
 
-	std::string oldKeyIDHex = request.params[0].get_str();
+	std::string oldKeyHex = request.params[0].get_str();
 
 	CTxDestination dest = DecodeDestination(request.params[1].get_str());
 	if (!IsValidDestination(dest)) {
@@ -260,22 +259,25 @@ UniValue mgetrawrevealtx(const JSONRPCRequest& request)
 		if (keyid.IsNull()) {
 			throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to a key");
 		}
-		if (keyid.GetHex() == oldKeyIDHex) {
+		CPubKey vchPubKey;
+		pwallet->GetPubKey(keyid, vchPubKey);
+		if (HexStr(vchPubKey) == oldKeyHex) {
 			CTxIn in(COutPoint(out.tx->tx->GetHash(), out.i));
 			rawTx.vin.push_back(in);
+			CPubKey qrPubKey(vchPubKey.begin(), vchPubKey.end());
+			qrPubKey.makeQR();
+			std::pair<CPubKey, CPubKey> p2(vchPubKey, qrPubKey);
+			rawTx.qrWit.push_back(p2);
 			totalAmount += out.tx->tx->vout[out.i].nValue;
 		}
 	}
 	totalAmount -= 10000; // incentivise transaction to be mined
 
-	// Build the outputs
+	// Build the output
 	CScript scriptPubKey = GetScriptForDestination(dest);
 
 	CTxOut out(totalAmount, scriptPubKey);
 	rawTx.vout.push_back(out);
-
-	rawTx.qrRevealData.stack = request.params[2].get_str();
-	std::cout<<"Creating with data: " + rawTx.qrRevealData.stack<<std::endl;
 	return EncodeHexTx(rawTx);
 }
 
@@ -290,11 +292,11 @@ UniValue msks(const JSONRPCRequest& request)
 	if (request.fHelp || request.params.size() != 0)
 		throw std::runtime_error(
 			"msks\n"
-			"\nReturns an object where the keys are ecdsa key ids in hex and the"
-			" values are details about the funds, outptus and addresses secured by the respective key.\n"
+			"\nReturns an object where the keys are addresses and the"
+			" values are hashes of public keys.\n"
 			"\nArguments: none\n"
 			"\nResult:\n"
-			"hexstring");
+			"map from addresses to hashes of public keys");
 
 	ObserveSafeMode();
 
@@ -303,23 +305,11 @@ UniValue msks(const JSONRPCRequest& request)
 	pwallet->BlockUntilSyncedToCurrentChain();
 
 	LOCK2(cs_main, pwallet->cs_wallet);
-	std::vector<COutput> vecOutputs;
-	pwallet->AvailableCoins(vecOutputs);
 	UniValue res(UniValue::VOBJ);
-	for (const COutput& out : vecOutputs) {
-		CTxDestination address;
-		const CScript& scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
-		if (!ExtractDestination(scriptPubKey, address)) {
-			continue;
-		}
-		if (!IsValidDestination(address)) {
-			throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin address");
-		}
-		CKeyID keyId = GetKeyForDestination(*pwallet, address);
-		if (keyId.IsNull()) {
-			continue;
-		}
-		res.pushKV(EncodeDestination(address), keyId.ToString());
+	for (const std::pair<CTxDestination, CAddressBookData> p : pwallet->mapAddressBook) {
+		CPubKey vchPubKey;
+		pwallet->GetPubKey(GetKeyForDestination(*pwallet, p.first), vchPubKey);
+		res.pushKV(EncodeDestination(p.first), HexStr(vchPubKey));
 	}
 	return res;
 }

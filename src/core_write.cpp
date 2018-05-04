@@ -204,7 +204,12 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
         vout.push_back(out);
     }
     entry.pushKV("vout", vout);
-    entry.pushKV("commitdata", UniValue(tx.qrRevealData.stack));
+
+    UniValue qrWit(UniValue::VOBJ);
+    for (const std::pair<CPubKey, CPubKey> qw : tx.qrWit) {
+    	qrWit.pushKV(qw.first.GetHash().ToString(), UniValue(qw.second.GetHash().ToString()));
+    }
+    entry.pushKV("qrWitness", qrWit);
 
     if (!hashBlock.IsNull())
         entry.pushKV("blockhash", hashBlock.GetHex());
