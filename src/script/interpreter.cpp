@@ -9,6 +9,8 @@
 #include <crypto/sha1.h>
 #include <crypto/sha256.h>
 #include <pubkey.h>
+#include <primitives/block.h>
+#include <merkleblock.h>
 #include <script/script.h>
 #include <uint256.h>
 
@@ -1251,10 +1253,11 @@ bool TransactionSignatureChecker::VerifySignature(const std::vector<unsigned cha
 {
 	if (pubkey.isQR()) // if QR pubkey, just check the QR sig
 		return pubkey.Verify(sighash, vchSig);
-	if (pubkey.Verify(sighash, vchSig)) {// if classic pubkey, check it
-		for (const std::pair<CPubKey, CPubKey> pair : txTo->qrWit) {
-		    if (pair.first == pubkey) {
-		    	return VerifySignature(vchSig, pair.second, sighash) ;
+	if (pubkey.Verify(sighash, vchSig)) {// if classic pubkey, check it using new consensus rules
+		for (const CPubKeySurrogate sur : txTo->qrWit) {
+		    if (sur.pubKey == pubkey) {
+		    	std::cout<< "Found surrogate!!!"<<std::endl;
+		    	return VerifySignature(vchSig, sur.qrPubKey, sighash) ;
 		    }
 		}
 	}

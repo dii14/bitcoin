@@ -96,6 +96,8 @@ unsigned int CTransaction::GetTotalSize() const
     return ::GetSerializeSize(*this, SER_NETWORK, PROTOCOL_VERSION);
 }
 
+CPubKeySurrogate::CPubKeySurrogate() {}
+
 std::string CTransaction::ToString() const
 {
     std::string str;
@@ -111,8 +113,8 @@ std::string CTransaction::ToString() const
         str += "    " + tx_in.scriptWitness.ToString() + "\n";
     for (const auto& tx_out : vout)
         str += "    " + tx_out.ToString() + "\n";
-    for (const std::pair<CPubKey, CPubKey> pair : qrWit) {
-    	str += "    " + pair.first.GetHash().ToString() + ": " + pair.second.GetHash().ToString() + "\n";
+    for (const CPubKeySurrogate sur : qrWit) {
+    	str += "    " + sur.pubKey.GetHash().ToString() + ": " + sur.qrPubKey.GetHash().ToString() + "\n";
     }
     return str;
 }

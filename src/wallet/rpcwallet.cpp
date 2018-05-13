@@ -264,10 +264,16 @@ UniValue mgetrawrevealtx(const JSONRPCRequest& request)
 		if (HexStr(vchPubKey) == oldKeyHex) {
 			CTxIn in(COutPoint(out.tx->tx->GetHash(), out.i));
 			rawTx.vin.push_back(in);
+
 			CPubKey qrPubKey(vchPubKey.begin(), vchPubKey.end());
 			qrPubKey.makeQR();
-			std::pair<CPubKey, CPubKey> p2(vchPubKey, qrPubKey);
-			rawTx.qrWit.push_back(p2);
+
+			CPubKeySurrogate sur = CPubKeySurrogate();
+			sur.pubKey = vchPubKey;
+			sur.qrPubKey = qrPubKey;
+			sur.
+
+			rawTx.qrWit.push_back(sur);
 			totalAmount += out.tx->tx->vout[out.i].nValue;
 		}
 	}

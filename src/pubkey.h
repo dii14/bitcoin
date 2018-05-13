@@ -26,6 +26,7 @@ public:
 
 typedef uint256 ChainCode;
 
+
 /** An encapsulated public key. */
 class CPubKey
 {

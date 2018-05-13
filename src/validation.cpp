@@ -40,6 +40,8 @@
 #include <validationinterface.h>
 #include <warnings.h>
 
+#include <merkleblock.h>
+
 #include <future>
 #include <sstream>
 
@@ -541,6 +543,64 @@ static bool CheckInputsFromMempoolAndCache(const CTransaction& tx, CValidationSt
     return CheckInputs(tx, state, view, true, flags, cacheSigStore, true, txdata);
 }
 
+bool CheckSurrogate(CPubKeySurrogate sur) {
+	CPubKey qrPubKey = sur.qrPubKey;
+	CPubKey pubkey = sur.pubKey;
+	CScript testScript = CScript();
+	uint256 h = Hash(pubkey.begin(), pubkey.end(), qrPubKey.begin(), qrPubKey.end());
+	std::vector<unsigned char> data (h.begin(), h.end());
+	testScript << OP_RETURN << data;
+
+	if (sur.commitTx->vout[0].scriptPubKey != testScript) {
+		std::cout<< "The commit transaction does not include the hash of the pair of the two keys."<<std::endl;
+		return false;
+	}
+
+	CBlockHeader blockHeader = CBlockHeader();
+	blockHeader.nVersion = sur.nVersion;
+	blockHeader.hashPrevBlock = sur.hashPrevBlock;
+	blockHeader.hashMerkleRoot = sur.hashMerkleRoot;
+	blockHeader.nTime = sur.nTime;
+	blockHeader.nBits = sur.nBits;
+	blockHeader.nNonce = sur.nNonce;
+
+	CPartialMerkleTree merkleTree = CPartialMerkleTree();
+	merkleTree.nTransactions = sur.nTransactions;
+	merkleTree.vBits = sur.vBits;
+	merkleTree.vHash = sur.vHash;
+	merkleTree.fBad = sur.fBad;
+
+	std::vector<uint256> vMatch;
+	std::vector<unsigned int> vIndex;
+	if (merkleTree.ExtractMatches(vMatch, vIndex) != blockHeader.hashMerkleRoot) {
+		std::cout<< "The merkle proof failed."<<std::endl;
+		return false;
+	}
+	if (vMatch.size() != 1) {
+		std::cout<< "The merkleblock does not reference only on transaction."<<std::endl;
+		return false;
+	}
+
+	if (sur.commitTx->GetHash().GetHex() != vMatch[0].GetHex()) {
+		std::cout<< "The merkleblock does not reference the commit transaction."<<std::endl;
+		return false;
+	}
+
+	LOCK(cs_main);
+
+	const CBlockIndex* pindex = LookupBlockIndex(blockHeader.GetHash());
+	if (!pindex || !chainActive.Contains(pindex)) {
+		std::cout<<"Block not found in chain"<<std::endl;
+		return false;
+	}
+
+	if (pindex->nHeight + 100 > chainActive.Height()) {
+		std::cout<<"Commit transaction is not old enough"<<std::endl;
+		return false;
+	}
+	return true;
+}
+
 static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool& pool, CValidationState& state, const CTransactionRef& ptx,
                               bool* pfMissingInputs, int64_t nAcceptTime, std::list<CTransactionRef>* plTxnReplaced,
                               bool bypass_limits, const CAmount& nAbsurdFee, std::vector<COutPoint>& coins_to_uncache, bool test_accept)
@@ -565,6 +625,11 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     if (!gArgs.GetBoolArg("-prematurewitness", false) && tx.HasWitness() && !witnessEnabled) {
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-witness-yet", true);
     }
+
+    // Verify validity of qrWitness
+    for (CPubKeySurrogate sur : tx.qrWit)
+    	if (!CheckSurrogate(sur))
+    		return false;
 
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
