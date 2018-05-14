@@ -49,7 +49,7 @@
  */
 class CPartialMerkleTree
 {
-protected:
+public:
     /** the total number of transactions in the block */
     unsigned int nTransactions;
 

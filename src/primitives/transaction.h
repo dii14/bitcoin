@@ -432,27 +432,13 @@ typedef std::shared_ptr<const CTransaction> CTransactionRef;
 static inline CTransactionRef MakeTransactionRef() { return std::make_shared<const CTransaction>(); }
 template <typename Tx> static inline CTransactionRef MakeTransactionRef(Tx&& txIn) { return std::make_shared<const CTransaction>(std::forward<Tx>(txIn)); }
 
-class CMerkleBlock;
-typedef std::shared_ptr<const CMerkleBlock> CMerkleBlockRef;
-
 class CPubKeySurrogate
 {
 public:
 	CPubKey pubKey;
 	CPubKey qrPubKey;
 	CTransactionRef commitTx;
-	// Block Header
-	int32_t nVersion;
-	uint256 hashPrevBlock;
-	uint256 hashMerkleRoot;
-	uint32_t nTime;
-	uint32_t nBits;
-	uint32_t nNonce;
-	// PartialMerkleTree
-	unsigned int nTransactions;
-	std::vector<bool> vBits;
-	std::vector<uint256> vHash;
-	bool fBad;
+	std::string proof;
 
 	CPubKeySurrogate();
 
@@ -463,27 +449,7 @@ public:
 		READWRITE(pubKey);
 		READWRITE(qrPubKey);
 		READWRITE(commitTx);
-		READWRITE(this->nVersion);
-		READWRITE(hashPrevBlock);
-		READWRITE(hashMerkleRoot);
-		READWRITE(nTime);
-		READWRITE(nBits);
-		READWRITE(nNonce);
-		READWRITE(nTransactions);
-		READWRITE(vHash);
-		std::vector<unsigned char> vBytes;
-		if (ser_action.ForRead()) {
-			READWRITE(vBytes);
-			vBits.resize(vBytes.size() * 8);
-			for (unsigned int p = 0; p < vBits.size(); p++)
-				vBits[p] = (vBytes[p / 8] & (1 << (p % 8))) != 0;
-			fBad = false;
-		} else {
-			vBytes.resize((vBits.size()+7)/8);
-			for (unsigned int p = 0; p < vBits.size(); p++)
-				vBytes[p / 8] |= vBits[p] << (p % 8);
-			READWRITE(vBytes);
-		}
+		READWRITE(proof);
 	}
 };
 

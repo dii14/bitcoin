@@ -548,7 +548,7 @@ bool CheckSurrogate(CPubKeySurrogate sur) {
 	CPubKey pubkey = sur.pubKey;
 	CScript testScript = CScript();
 	uint256 h = Hash(pubkey.begin(), pubkey.end(), qrPubKey.begin(), qrPubKey.end());
-	std::vector<unsigned char> data (h.begin(), h.end());
+	std::vector<unsigned char> data = ParseHex(h.GetHex());
 	testScript << OP_RETURN << data;
 
 	if (sur.commitTx->vout[0].scriptPubKey != testScript) {
@@ -556,28 +556,19 @@ bool CheckSurrogate(CPubKeySurrogate sur) {
 		return false;
 	}
 
-	CBlockHeader blockHeader = CBlockHeader();
-	blockHeader.nVersion = sur.nVersion;
-	blockHeader.hashPrevBlock = sur.hashPrevBlock;
-	blockHeader.hashMerkleRoot = sur.hashMerkleRoot;
-	blockHeader.nTime = sur.nTime;
-	blockHeader.nBits = sur.nBits;
-	blockHeader.nNonce = sur.nNonce;
-
-	CPartialMerkleTree merkleTree = CPartialMerkleTree();
-	merkleTree.nTransactions = sur.nTransactions;
-	merkleTree.vBits = sur.vBits;
-	merkleTree.vHash = sur.vHash;
-	merkleTree.fBad = sur.fBad;
+	CDataStream ssMB(ParseHex(sur.proof), SER_NETWORK, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_WITNESS);
+	CMerkleBlock merkleBlock;
+	ssMB >> merkleBlock;
 
 	std::vector<uint256> vMatch;
 	std::vector<unsigned int> vIndex;
-	if (merkleTree.ExtractMatches(vMatch, vIndex) != blockHeader.hashMerkleRoot) {
+	if (merkleBlock.txn.ExtractMatches(vMatch, vIndex) != merkleBlock.header.hashMerkleRoot) {
 		std::cout<< "The merkle proof failed."<<std::endl;
 		return false;
 	}
+
 	if (vMatch.size() != 1) {
-		std::cout<< "The merkleblock does not reference only on transaction."<<std::endl;
+		std::cout<< "The merkleblock does not reference only one transaction."<<std::endl;
 		return false;
 	}
 
@@ -588,7 +579,7 @@ bool CheckSurrogate(CPubKeySurrogate sur) {
 
 	LOCK(cs_main);
 
-	const CBlockIndex* pindex = LookupBlockIndex(blockHeader.GetHash());
+	const CBlockIndex* pindex = LookupBlockIndex(merkleBlock.header.GetHash());
 	if (!pindex || !chainActive.Contains(pindex)) {
 		std::cout<<"Block not found in chain"<<std::endl;
 		return false;
@@ -598,6 +589,7 @@ bool CheckSurrogate(CPubKeySurrogate sur) {
 		std::cout<<"Commit transaction is not old enough"<<std::endl;
 		return false;
 	}
+
 	return true;
 }
 

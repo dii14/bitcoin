@@ -206,8 +206,8 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
     entry.pushKV("vout", vout);
 
     UniValue qrWit(UniValue::VOBJ);
-    for (const std::pair<CPubKey, CPubKey> qw : tx.qrWit) {
-    	qrWit.pushKV(qw.first.GetHash().ToString(), UniValue(qw.second.GetHash().ToString()));
+    for (const CPubKeySurrogate qw : tx.qrWit) {
+    	qrWit.pushKV(qw.pubKey.GetHash().ToString(), UniValue(qw.qrPubKey.GetHash().ToString()));
     }
     entry.pushKV("qrWitness", qrWit);
 

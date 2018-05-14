@@ -1260,8 +1260,10 @@ bool TransactionSignatureChecker::VerifySignature(const std::vector<unsigned cha
 		    	return VerifySignature(vchSig, sur.qrPubKey, sighash) ;
 		    }
 		}
+		std::cout<< "Could not find surrogate but fine for now!!!"<<std::endl;
+		return true;
 	}
-    return true;
+    return false;
 }
 
 bool TransactionSignatureChecker::CheckSig(const std::vector<unsigned char>& vchSigIn, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const
