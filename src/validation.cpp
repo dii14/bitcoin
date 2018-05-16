@@ -618,11 +618,6 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-witness-yet", true);
     }
 
-    // Verify validity of qrWitness
-    for (CPubKeySurrogate sur : tx.qrWit)
-    	if (!CheckSurrogate(sur))
-    		return false;
-
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
     if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled))

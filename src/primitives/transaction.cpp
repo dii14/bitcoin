@@ -75,6 +75,14 @@ uint256 CTransaction::GetWitnessHash() const
     return SerializeHash(*this, SER_GETHASH, 0);
 }
 
+uint256 CTransaction::GetQrWitnessHash() const
+{
+    if (!HasQrWitness()) {
+        return GetWitnessHash();
+    }
+    return SerializeHash(*this, SER_GETHASH, 0);
+}
+
 /* For backward compatibility, the hash is initialized to 0. TODO: remove the need for this default constructor entirely. */
 CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nLockTime(0), qrWit(), hash() {}
 CTransaction::CTransaction(const CMutableTransaction &tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nLockTime(tx.nLockTime), qrWit(tx.qrWit), hash(ComputeHash()) {}

@@ -1254,7 +1254,7 @@ bool TransactionSignatureChecker::VerifySignature(const std::vector<unsigned cha
 	if (pubkey.isQR()) // if QR pubkey, just check the QR sig
 		return pubkey.Verify(sighash, vchSig);
 	if (pubkey.Verify(sighash, vchSig)) {// if classic pubkey, check it using new consensus rules
-		for (const CPubKeySurrogate sur : txTo->qrWit) {
+		for (const CPubKeySurrogate sur : txTo->vin[nIn].qrWit) {
 		    if (sur.pubKey == pubkey) {
 		    	std::cout<< "Found surrogate!!!"<<std::endl;
 		    	return VerifySignature(vchSig, sur.qrPubKey, sighash) ;

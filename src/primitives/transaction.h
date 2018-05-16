@@ -56,6 +56,12 @@ public:
     std::string ToString() const;
 };
 
+class CPubKeySurrogate;
+
+/** Extra data for a reveal transaction to link each public key to a commitment.
+ */
+typedef std::vector<CPubKeySurrogate> CTxQRWitness;
+
 /** An input of a transaction.  It contains the location of the previous
  * transaction's output that it claims and a signature that matches the
  * output's public key.
@@ -67,6 +73,8 @@ public:
     CScript scriptSig;
     uint32_t nSequence;
     CScriptWitness scriptWitness; //! Only serialized through CTransaction
+    CTxQRWitness qrWit;
+
 
     /* Setting nSequence to this value for every input in a transaction
      * disables nLockTime. */
@@ -110,6 +118,7 @@ public:
         READWRITE(prevout);
         READWRITE(scriptSig);
         READWRITE(nSequence);
+        READWRITE(qrWit);
     }
 
     friend bool operator==(const CTxIn& a, const CTxIn& b)
@@ -178,12 +187,6 @@ public:
 
 struct CMutableTransaction;
 
-class CPubKeySurrogate;
-
-/** Extra data for a reveal transaction to link each public key to a commitment.
- */
-typedef std::vector<CPubKeySurrogate> CTxQRWitness;
-
 /**
  * Basic transaction serialization format:
  * - int32_t nVersion
@@ -206,6 +209,7 @@ typedef std::vector<CPubKeySurrogate> CTxQRWitness;
 template<typename Stream, typename TxType>
 inline void UnserializeTransaction(TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
+    const bool fAllowQrWitness = true;
 
     s >> tx.nVersion;
     unsigned char flags = 0;
@@ -213,7 +217,7 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
     tx.vout.clear();
     /* Try to read the vin. In case the dummy is there, this will be read as an empty vector. */
     s >> tx.vin;
-    if (tx.vin.size() == 0 && fAllowWitness) {
+    if (tx.vin.size() == 0 && (fAllowWitness || fAllowQrWitness)) {
         /* We read a dummy or an empty vin. */
         s >> flags;
         if (flags != 0) {
@@ -231,10 +235,12 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
             s >> tx.vin[i].scriptWitness.stack;
         }
     }
-    if (flags & 2) {
+    if ((flags & 2) && fAllowQrWitness) {
     	/* The qr-scheme flag is present. */
     	flags ^= 2;
-    	s >> tx.qrWit;
+    	for (size_t i = 0; i < tx.vin.size(); i++) {
+			s >> tx.vin[i].qrWit;
+		}
     }
     if (flags) {
         /* Unknown flag in the serialization */
@@ -246,6 +252,7 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
 template<typename Stream, typename TxType>
 inline void SerializeTransaction(const TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
+    const bool fAllowQrWitness = true;
 
     s << tx.nVersion;
     unsigned char flags = 0;
@@ -256,9 +263,12 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
             flags |= 1;
         }
     }
-    if (tx.qrWit.size()) {
-		flags |= 2;
-	}
+    if (fAllowQrWitness) {
+        /* Check whether qrWitnesses need to be serialized. */
+		if (tx.HasQrWitness()) {
+			flags |= 2;
+		}
+    }
     if (flags) {
         /* Use extended format in case witnesses are to be serialized. */
         std::vector<CTxIn> vinDummy;
@@ -273,7 +283,9 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
         }
     }
     if (flags & 2) {
-    	s << tx.qrWit;
+    	for (size_t i = 0; i < tx.vin.size(); i++) {
+			s << tx.vin[i].qrWit;
+		}
     }
     s << tx.nLockTime;
 }
@@ -302,7 +314,6 @@ public:
     const std::vector<CTxIn> vin;
     const std::vector<CTxOut> vout;
     const int32_t nVersion;
-    const CTxQRWitness qrWit;
     const uint32_t nLockTime;
 private:
     /** Memory only. */
@@ -338,6 +349,9 @@ public:
 
     // Compute a hash that includes both transaction and witness data
     uint256 GetWitnessHash() const;
+
+    // Compute a hash that includes transaction, witness and qrWitness data
+    uint256 GetQrWitnessHash() const;
 
     // Return sum of txouts.
     CAmount GetValueOut() const;
@@ -377,6 +391,16 @@ public:
 		}
 		return false;
     }
+
+    bool HasQrWitness() const
+	{
+		for (size_t i = 0; i < vin.size(); i++) {
+			if (vin[i].qrWit.size() != 0) {
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 /** A mutable version of CTransaction. */
@@ -385,7 +409,6 @@ struct CMutableTransaction
     std::vector<CTxIn> vin;
     std::vector<CTxOut> vout;
     int32_t nVersion;
-    CTxQRWitness qrWit;
     uint32_t nLockTime;
 
     CMutableTransaction();
@@ -426,6 +449,16 @@ struct CMutableTransaction
         }
         return false;
     }
+
+    bool HasQrWitness() const
+	{
+		for (size_t i = 0; i < vin.size(); i++) {
+			if (vin[i].qrWit.size() != 0) {
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 typedef std::shared_ptr<const CTransaction> CTransactionRef;
@@ -438,7 +471,8 @@ public:
 	CPubKey pubKey;
 	CPubKey qrPubKey;
 	CTransactionRef commitTx;
-	std::string proof;
+	std::string proof; // This is a serialized merklblock object
+	std::vector<unsigned char> qrSig;
 
 	CPubKeySurrogate();
 
@@ -450,6 +484,7 @@ public:
 		READWRITE(qrPubKey);
 		READWRITE(commitTx);
 		READWRITE(proof);
+		READWRITE(qrSig);
 	}
 };
 
