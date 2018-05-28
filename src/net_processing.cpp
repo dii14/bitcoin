@@ -201,6 +201,7 @@ struct CNodeState {
     bool fProvidesHeaderAndIDs;
     //! Whether this peer can give us witnesses
     bool fHaveWitness;
+    bool fHaveQRWitness;
     //! Whether this peer wants witnesses in cmpctblocks/blocktxns
     bool fWantsCmpctWitness;
     /**
@@ -259,6 +260,7 @@ struct CNodeState {
         fPreferHeaderAndIDs = false;
         fProvidesHeaderAndIDs = false;
         fHaveWitness = false;
+        fHaveQRWitness = false;
         fWantsCmpctWitness = false;
         fSupportsDesiredCmpctVersion = false;
         m_chain_sync = { 0, nullptr, false, false };
@@ -414,7 +416,7 @@ static void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash) {
 static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connman) {
     AssertLockHeld(cs_main);
     CNodeState* nodestate = State(nodeid);
-    if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion) {
+    if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion || (pfrom->GetLocalServices() & NODE_QRWITNESS)) {
         // Never ask from peers who can't provide witnesses.
         return;
     }
@@ -532,6 +534,10 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vec
                 // We wouldn't download this block or its descendants from this peer.
                 return;
             }
+            if (!State(nodeid)->fHaveQRWitness && IsQRWitnessEnabled(pindex->pprev, consensusParams)) {
+				// We wouldn't download this block or its descendants from this peer.
+				return;
+			}
             if (pindex->nStatus & BLOCK_HAVE_DATA || chainActive.Contains(pindex)) {
                 if (pindex->nChainTx)
                     state->pindexLastCommonBlock = pindex;
@@ -995,6 +1001,7 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     {
     case MSG_TX:
     case MSG_WITNESS_TX:
+    case MSG_QRWITNESS_TX:
         {
             assert(recentRejects);
             if (chainActive.Tip()->GetBlockHash() != hashRecentRejectsChainTip)
@@ -1019,6 +1026,7 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
         }
     case MSG_BLOCK:
     case MSG_WITNESS_BLOCK:
+    case MSG_QRWITNESS_BLOCK:
         return LookupBlockIndex(inv.hash) != nullptr;
     }
     // Don't know what it is, just say we already got one
@@ -1152,7 +1160,9 @@ void static ProcessGetBlockData(CNode* pfrom, const Consensus::Params& consensus
         if (inv.type == MSG_BLOCK)
             connman->PushMessage(pfrom, msgMaker.Make(SERIALIZE_TRANSACTION_NO_WITNESS, NetMsgType::BLOCK, *pblock));
         else if (inv.type == MSG_WITNESS_BLOCK)
-            connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::BLOCK, *pblock));
+            connman->PushMessage(pfrom, msgMaker.Make(SERIALIZE_TRANSACTION_NO_QRWITNESS, NetMsgType::BLOCK, *pblock));
+        else if (inv.type == MSG_QRWITNESS_BLOCK)
+			connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::BLOCK, *pblock));
         else if (inv.type == MSG_FILTERED_BLOCK)
         {
             bool sendMerkleBlock = false;
@@ -1223,7 +1233,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
     {
         LOCK(cs_main);
 
-        while (it != pfrom->vRecvGetData.end() && (it->type == MSG_TX || it->type == MSG_WITNESS_TX)) {
+        while (it != pfrom->vRecvGetData.end() && (it->type == MSG_TX || it->type == MSG_WITNESS_TX || it->type == MSG_QRWITNESS_TX)) {
             if (interruptMsgProc)
                 return;
             // Don't bother if send buffer is too full to respond anyway
@@ -1237,6 +1247,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
             bool push = false;
             auto mi = mapRelay.find(inv.hash);
             int nSendFlags = (inv.type == MSG_TX ? SERIALIZE_TRANSACTION_NO_WITNESS : 0);
+            nSendFlags |= (inv.type == MSG_WITNESS_TX ? SERIALIZE_TRANSACTION_NO_QRWITNESS : 0);
             if (mi != mapRelay.end()) {
                 connman->PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::TX, *mi->second));
                 push = true;
@@ -1260,7 +1271,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
 
     if (it != pfrom->vRecvGetData.end() && !pfrom->fPauseSend) {
         const CInv &inv = *it;
-        if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK || inv.type == MSG_WITNESS_BLOCK) {
+        if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK || inv.type == MSG_WITNESS_BLOCK ||  inv.type == MSG_QRWITNESS_BLOCK) {
             it++;
             ProcessGetBlockData(pfrom, consensusParams, inv, connman, interruptMsgProc);
         }
@@ -1285,6 +1296,9 @@ static uint32_t GetFetchFlags(CNode* pfrom) {
     if ((pfrom->GetLocalServices() & NODE_WITNESS) && State(pfrom->GetId())->fHaveWitness) {
         nFetchFlags |= MSG_WITNESS_FLAG;
     }
+    if ((pfrom->GetLocalServices() & NODE_QRWITNESS) && State(pfrom->GetId())->fHaveQRWitness) {
+		nFetchFlags |= MSG_QRWITNESS_FLAG;
+	}
     return nFetchFlags;
 }
 
@@ -1449,7 +1463,8 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
             while (pindexWalk && !chainActive.Contains(pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
                 if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                         !mapBlocksInFlight.count(pindexWalk->GetBlockHash()) &&
-                        (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness)) {
+                        (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness) &&
+						(!IsQRWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveQRWitness)) {
                     // We don't have this block, and it's not yet in flight.
                     vToFetch.push_back(pindexWalk);
                 }
@@ -1697,6 +1712,12 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             State(pfrom->GetId())->fHaveWitness = true;
         }
 
+        if((nServices & NODE_QRWITNESS))
+		{
+			LOCK(cs_main);
+			State(pfrom->GetId())->fHaveQRWitness = true;
+		}
+
         // Potentially mark this peer as a preferred download peer.
         {
         LOCK(cs_main);
@@ -1874,7 +1895,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         bool fAnnounceUsingCMPCTBLOCK = false;
         uint64_t nCMPCTBLOCKVersion = 0;
         vRecv >> fAnnounceUsingCMPCTBLOCK >> nCMPCTBLOCKVersion;
-        if (nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2)) {
+        if (!(pfrom->GetLocalServices() & NODE_QRWITNESS) &&
+        	(nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2))) {
             LOCK(cs_main);
             // fProvidesHeaderAndIDs is used to "lock in" version of compact blocks we send (fWantsCmpctWitness)
             if (!State(pfrom->GetId())->fProvidesHeaderAndIDs) {

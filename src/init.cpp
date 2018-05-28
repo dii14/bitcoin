@@ -1616,6 +1616,14 @@ bool AppInitMain()
         // doing so is that after activation, no upgraded nodes will fetch from you.
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
+    if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_QRWIT].nTimeout != 0) {
+		// Only advertise witness capabilities if they have a reasonable start time.
+		// This allows us to have the code merged without a defined softfork, by setting its
+		// end time to 0.
+		// Note that setting NODE_WITNESS is never required: the only downside from not
+		// doing so is that after activation, no upgraded nodes will fetch from you.
+		nLocalServices = ServiceFlags(nLocalServices | NODE_QRWITNESS);
+	}
 
     // ********************************************************* Step 11: import blocks
 

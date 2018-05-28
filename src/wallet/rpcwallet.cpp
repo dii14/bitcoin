@@ -228,6 +228,10 @@ UniValue mgetrawrevealtx(const JSONRPCRequest& request)
 	}
 	sur.commitTx = MakeTransactionRef(std::move(mtx));
 	sur.proof = request.params[3].get_str();
+	for (int i = 0; i<20; ++i) {
+		sur.qrSig.push_back(0x00);
+	}
+
 
 	// Construct tx with inputs all of the UTXOS secured by oldKey and compute total amount in them
 	CMutableTransaction rawTx;

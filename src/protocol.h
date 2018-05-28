@@ -261,6 +261,7 @@ enum ServiceFlags : uint64_t {
     // NODE_WITNESS indicates that a node can be asked for blocks and transactions including
     // witness data.
     NODE_WITNESS = (1 << 3),
+    NODE_QRWITNESS = (1 << 12),
     // NODE_XTHIN means the node supports Xtreme Thinblocks
     // If this is turned off then the node will not service nor make xthin requests
     NODE_XTHIN = (1 << 4),
@@ -362,6 +363,7 @@ public:
 
 /** getdata message type flags */
 const uint32_t MSG_WITNESS_FLAG = 1 << 30;
+const uint32_t MSG_QRWITNESS_FLAG = 1 << 29;
 const uint32_t MSG_TYPE_MASK    = 0xffffffff >> 2;
 
 /** getdata / inv message types.
@@ -379,6 +381,8 @@ enum GetDataMsg
     MSG_WITNESS_BLOCK = MSG_BLOCK | MSG_WITNESS_FLAG, //!< Defined in BIP144
     MSG_WITNESS_TX = MSG_TX | MSG_WITNESS_FLAG,       //!< Defined in BIP144
     MSG_FILTERED_WITNESS_BLOCK = MSG_FILTERED_BLOCK | MSG_WITNESS_FLAG,
+	MSG_QRWITNESS_BLOCK = MSG_WITNESS_BLOCK | MSG_QRWITNESS_FLAG,
+	MSG_QRWITNESS_TX = MSG_WITNESS_TX | MSG_QRWITNESS_FLAG,
 };
 
 /** inv message data */

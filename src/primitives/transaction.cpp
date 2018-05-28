@@ -81,7 +81,7 @@ uint256 CTransaction::GetWitnessHash() const
     if (!HasWitness()) {
         return GetHash();
     }
-    return SerializeHash(*this, SER_GETHASH, SERIALIZE_TRANSACTION_NO_QR_WITNESS);
+    return SerializeHash(*this, SER_GETHASH, SERIALIZE_TRANSACTION_NO_QRWITNESS);
 }
 
 uint256 CTransaction::GetQRWitnessHash() const

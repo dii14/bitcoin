@@ -14,7 +14,7 @@
 #include <pubkey.h>
 
 static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
-static const int SERIALIZE_TRANSACTION_NO_QR_WITNESS = 0x80000000;
+static const int SERIALIZE_TRANSACTION_NO_QRWITNESS = 0x80000000;
 
 /** An outpoint - a combination of a transaction hash and an index n into its vout */
 class COutPoint
@@ -206,7 +206,7 @@ struct CMutableTransaction;
 template<typename Stream, typename TxType>
 inline void UnserializeTransaction(TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
-    const bool fAllowQrWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_QR_WITNESS);
+    const bool fAllowQrWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_QRWITNESS);
 
     s >> tx.nVersion;
     unsigned char flags = 0;
@@ -249,7 +249,7 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
 template<typename Stream, typename TxType>
 inline void SerializeTransaction(const TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
-    const bool fAllowQrWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_QR_WITNESS);
+    const bool fAllowQrWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_QRWITNESS);
 
     s << tx.nVersion;
     unsigned char flags = 0;
