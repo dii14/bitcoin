@@ -416,7 +416,7 @@ static void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash) {
 static void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connman) {
     AssertLockHeld(cs_main);
     CNodeState* nodestate = State(nodeid);
-    if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion || (pfrom->GetLocalServices() & NODE_QRWITNESS)) {
+    if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion) {
         // Never ask from peers who can't provide witnesses.
         return;
     }
@@ -1895,8 +1895,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         bool fAnnounceUsingCMPCTBLOCK = false;
         uint64_t nCMPCTBLOCKVersion = 0;
         vRecv >> fAnnounceUsingCMPCTBLOCK >> nCMPCTBLOCKVersion;
-        if (!(pfrom->GetLocalServices() & NODE_QRWITNESS) &&
-        	(nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2))) {
+        if (nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2)) {
             LOCK(cs_main);
             // fProvidesHeaderAndIDs is used to "lock in" version of compact blocks we send (fWantsCmpctWitness)
             if (!State(pfrom->GetId())->fProvidesHeaderAndIDs) {
